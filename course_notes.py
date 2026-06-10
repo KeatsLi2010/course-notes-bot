@@ -158,8 +158,8 @@ def process_video_api(api_url: str, video_path: str, output_path: str, fps: floa
     print(f"✅ 笔记已保存到 {output_path}")
 
 
-def process_images_api(api_url: str, image_dir: str, output_path: str):
-    """通过 llama.cpp API 处理图片文件夹"""
+def process_images_api(api_url: str, image_dir: str, output_path: str, batch_size: int = 10):
+    """通过 llama.cpp API 处理图片文件夹，支持批量上传"""
     exts = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
     images = sorted(
         [os.path.join(image_dir, f) for f in os.listdir(image_dir)
@@ -169,35 +169,43 @@ def process_images_api(api_url: str, image_dir: str, output_path: str):
         print(f"❌ {image_dir} 中没有图片")
         return
 
-    print(f"📷 找到 {len(images)} 张图片，开始生成笔记...")
+    print(f"📷 找到 {len(images)} 张图片，每批 {batch_size} 张，开始生成笔记...")
     all_notes = []
 
-    for i, img_path in enumerate(images, 1):
-        name = os.path.basename(img_path)
-        print(f"  [{i}/{len(images)}] {name} ...", end=" ", flush=True)
+    for batch_start in range(0, len(images), batch_size):
+        batch = images[batch_start:batch_start + batch_size]
+        batch_num = batch_start // batch_size + 1
+        total_batches = (len(images) + batch_size - 1) // batch_size
+        names = [os.path.basename(p) for p in batch]
 
-        b64 = image_to_base64(img_path)
-        ext = Path(img_path).suffix.lower().replace(".", "")
-        mime = f"image/{ext}" if ext != "jpg" else "image/jpeg"
+        print(f"\n  [批次 {batch_num}/{total_batches}] {', '.join(names)} ...", end=" ", flush=True)
+
+        content = []
+        for img_path in batch:
+            b64 = image_to_base64(img_path)
+            ext = Path(img_path).suffix.lower().replace(".", "")
+            mime = f"image/{ext}" if ext != "jpg" else "image/jpeg"
+            content.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
+
+        content.append({"type": "text", "text": NOTE_PROMPT})
 
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": [
-                {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
-                {"type": "text", "text": NOTE_PROMPT},
-            ]},
+            {"role": "user", "content": content},
         ]
         try:
-            note = chat_api(api_url, messages)
-            all_notes.append(f"## {name}\n\n{note}\n")
+            note = chat_api(api_url, messages, max_tokens=4096)
+            for name in names:
+                all_notes.append(f"## {name}\n")
+            all_notes.append(note + "\n")
             print("✓")
         except Exception as e:
             print(f"✗ ({e})")
 
     # 汇总
-    if len(all_notes) >= 2:
+    if len(all_notes) >= 3:
         print("📝 汇总整合中...", end=" ", flush=True)
-        combined = "\n\n".join(all_notes)
+        combined = "\n".join(all_notes)
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": combined + "\n\n" + SUMMARY_PROMPT},
@@ -210,8 +218,8 @@ def process_images_api(api_url: str, image_dir: str, output_path: str):
             print(f"✗ ({e})")
 
     with open(output_path, "w", encoding="utf-8") as f:
-        f.write("\n\n".join(all_notes))
-    print(f"✅ 笔记已保存到 {output_path}")
+        f.write("\n".join(all_notes))
+    print(f"\n✅ 笔记已保存到 {output_path}")
 
 
 # ── 本地 transformers 模式 ──────────────────────────────────
@@ -318,6 +326,8 @@ def main():
                         help="视频抽帧速率 (默认 0.5, 即每 2 秒一帧)")
     parser.add_argument("--max-frames", type=int, default=60,
                         help="视频最大抽帧数 (默认 60)")
+    parser.add_argument("--batch-size", type=int, default=10,
+                        help="每批上传图片数 (默认 10)")
     args = parser.parse_args()
 
     if not args.images and not args.video:
@@ -325,7 +335,7 @@ def main():
 
     if args.images:
         if args.api:
-            process_images_api(args.api, args.images, args.output)
+            process_images_api(args.api, args.images, args.output, args.batch_size)
         elif args.local:
             process_images_local(args.images, args.output, args.downsample)
         else:
