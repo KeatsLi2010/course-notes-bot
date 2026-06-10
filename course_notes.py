@@ -17,15 +17,23 @@ os.environ["TRITON_CACHE_DIR"] = os.path.join(os.path.dirname(os.path.abspath(__
 import argparse
 from pathlib import Path
 
-# 修补 gptqmodel 的 triton patcher — 新版 triton Autotuner 没有 _cache_lock
+# 修补 gptqmodel 的 triton patcher — 新版 triton 没有 _cache_lock
+# gptqmodel 在模型加载时自动 patch triton，需提前注入 _cache_lock
 import threading
-import gptqmodel.utils.nogil_patcher as _np
-_orig_patched_run = _np.patched_run
-def _safe_patched_run(self, *args, **kwargs):
-    if not hasattr(self, '_cache_lock'):
-        self._cache_lock = threading.Lock()
-    return _orig_patched_run(self, *args, **kwargs)
-_np.patched_run = _safe_patched_run
+import triton
+import triton.runtime.jit
+# 搜索 Autotuner/autotuner 类并注入 _cache_lock
+for attr_name in dir(triton.runtime.jit):
+    cls = getattr(triton.runtime.jit, attr_name)
+    if isinstance(cls, type) and 'autotun' in attr_name.lower():
+        if not hasattr(cls, '_cache_lock'):
+            cls._cache_lock = threading.Lock()
+# 也检查 triton.runtime
+for attr_name in dir(triton.runtime):
+    cls = getattr(triton.runtime, attr_name)
+    if isinstance(cls, type) and 'autotun' in attr_name.lower():
+        if not hasattr(cls, '_cache_lock'):
+            cls._cache_lock = threading.Lock()
 
 
 SYSTEM_PROMPT = """你是一个专业的课堂笔记助手。根据课件截图/板书和同步的语音转录，生成结构化的课堂笔记。
