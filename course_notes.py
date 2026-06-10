@@ -54,43 +54,14 @@ def find_videos(path: str) -> list[str]:
 def load_sensevoice():
     """加载 SenseVoice — 中文识别比 Whisper 更准更快"""
     from funasr import AutoModel
-    print(f"⏳ 加载 SenseVoice Small ...")
+    from funasr.utils.postprocess_utils import rich_transcription_postprocess
+    print("⏳ 加载 SenseVoice Small ...")
     model = AutoModel(
         model="iic/SenseVoiceSmall",
         trust_remote_code=True,
-        device="cuda:0" if __import__('torch').cuda.is_available() else "cpu",
+        device="cuda:0",
     )
-    return model
-
-
-def transcribe_sensevoice(model, audio_path: str) -> str:
-    """用 SenseVoice 转录"""
-    from funasr.utils.postprocess_utils import rich_transcription_postprocess
-    res = model.generate(
-        input=audio_path,
-        cache={},
-        language="zh",
-        use_itn=True,
-    )
-    return rich_transcription_postprocess(res[0]["text"])
-
-
-def load_whisper(model_name: str):
-    """加载 Whisper"""
-    import whisper
-    print(f"⏳ 加载 Whisper {model_name} ...")
-    return whisper.load_model(model_name)
-
-
-def transcribe_segment(whisper_model, audio_path: str) -> str:
-    """用 Whisper 转录一段音频"""
-    result = whisper_model.transcribe(
-        audio_path,
-        language="zh",
-        fp16=False,
-        initial_prompt="以下是普通话的句子。",
-    )
-    return result["text"].strip()
+    return model, rich_transcription_postprocess
 
 
 def process_one(model, processor, video_path: str, output_dir: str,
@@ -285,9 +256,6 @@ def main():
     parser = argparse.ArgumentParser(description="课堂笔记 — 视频+语音")
     parser.add_argument("--video", required=True, help="视频文件或文件夹")
     parser.add_argument("--model", default="./model", help="模型本地路径")
-    parser.add_argument("--whisper", default="base", help="Whisper 模型 (tiny/base/small/medium/large-v3)")
-    parser.add_argument("--asr", default="sensevoice", choices=["sensevoice", "whisper"],
-                        help="语音识别引擎 (sensevoice=更准更快, whisper=备选)")
     parser.add_argument("--output", default="./notes", help="输出目录")
     parser.add_argument("--downsample", default="16x", choices=["4x", "16x"])
     parser.add_argument("--fps", type=float, default=0.5)
@@ -340,8 +308,6 @@ def main():
                 print(f"📝 SenseVoice: {text}")
             except Exception as e:
                 print(f"⚠️ SenseVoice 失败: {e}")
-            except Exception as e:
-                print(f"⚠️ Whisper 失败: {e}")
             try: os.remove(seg_path)
             except: pass
         except FileNotFoundError:
@@ -367,23 +333,17 @@ def main():
     )
     print("✅ VLM 就绪")
 
-    # 加载语音识别
+    # 加载 SenseVoice
     asr_model = None
     transcribe_fn = None
-    if args.asr == "sensevoice":
-        try:
-            asr_model = load_sensevoice()
-            transcribe_fn = lambda path: transcribe_sensevoice(asr_model, path)
-        except Exception as e:
-            print(f"⚠️ SenseVoice 加载失败: {e}")
-    if asr_model is None:
-        try:
-            w = load_whisper(args.whisper)
-            asr_model = w
-            transcribe_fn = lambda path: transcribe_segment(w, path)
-            print("  已回退到 Whisper")
-        except Exception as e:
-            print(f"⚠️ Whisper 加载失败: {e}")
+    try:
+        asr_model, rich_postprocess = load_sensevoice()
+        transcribe_fn = lambda path: rich_postprocess(
+            asr_model.generate(input=path, cache={}, language="zh", use_itn=True)[0]["text"]
+        )
+        print("✅ SenseVoice 就绪")
+    except Exception as e:
+        print(f"⚠️ SenseVoice 加载失败: {e}")
 
     for video_path in videos:
         process_one(model, processor, video_path, args.output,
