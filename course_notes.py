@@ -256,6 +256,8 @@ def main():
     parser.add_argument("--max-frames", type=int, default=60)
     parser.add_argument("--audio-buffer", type=float, default=5.0,
                         help="每帧前后多取几秒音频做上下文 (默认 5s)")
+    parser.add_argument("--test-audio", action="store_true",
+                        help="单独测试音频提取+转录，不做笔记")
     args = parser.parse_args()
 
     videos = find_videos(args.video)
@@ -280,12 +282,53 @@ def main():
     )
     print("✅ VLM 就绪")
 
-    # 再加载 Whisper
+    # 加载 Whisper
     whisper_model = None
     try:
         whisper_model = load_whisper(args.whisper)
     except Exception as e:
-        print(f"⚠️ Whisper 加载失败，跳过语音转录: {e}")
+        print(f"⚠️ Whisper 加载失败: {e}")
+    if args.test_audio:
+        test_video = videos[0]
+        print(f"\n🧪 音频测试: {test_video}")
+        import av as _av
+        c = _av.open(test_video)
+        vs = c.streams.video[0]
+        astr = c.streams.audio[0] if c.streams.audio else None
+        c.close()
+        if astr is None:
+            print("❌ 视频无音频轨道")
+            return
+        dur = float(vs.duration * vs.time_base)
+        fps_v = float(vs.average_rate)
+        interval = max(1, int(fps_v / args.fps))
+        ts = interval / fps_v  # 第一帧的时间戳
+        start = max(0, ts - args.audio_buffer)
+        seg_dur = (interval / fps_v) + 2 * args.audio_buffer
+        seg_path = os.path.join(args.output, "_test_audio.wav")
+
+        import subprocess
+        ok = False
+        try:
+            subprocess.run(["ffmpeg", "-y", "-loglevel", "error",
+                "-ss", str(start), "-t", str(seg_dur),
+                "-i", test_video, "-ac", "1", "-ar", "16000", seg_path],
+                check=True, timeout=10)
+            ok = True
+        except Exception as e:
+            print(f"⚠️ ffmpeg 失败: {e}")
+
+        if ok and whisper_model:
+            print(f"  音频段: {start:.1f}s ~ {start+seg_dur:.1f}s")
+            txt = transcribe_segment(whisper_model, seg_path)
+            print(f"  转录结果: {txt}")
+            try: os.remove(seg_path)
+            except: pass
+        elif ok:
+            print(f"  ✅ 音频提取成功，但 Whisper 未加载")
+        else:
+            print("  ❌ 音频提取失败")
+        return
 
     for video_path in videos:
         process_one(model, processor, video_path, args.output,
