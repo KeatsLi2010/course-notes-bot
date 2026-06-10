@@ -1,0 +1,4 @@
+transformers>=5.7.0
+torch>=2.0
+torchvision
+av
