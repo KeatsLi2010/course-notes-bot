@@ -88,23 +88,32 @@ def process_one(model, processor, video_path: str, output_dir: str,
     has_audio = audio_stream is not None and whisper_model is not None
     print(f"  时长: {duration:.0f}s | {orig_fps:.1f}fps | ~{actual_frames}帧 | 音频: {'✓' if has_audio else '✗'}")
 
-    # 抽帧 + 抽对应音频片段
+    # 抽帧（若已存在则跳过）
     frame_count = 0
     saved_frames = []
-    frame_timestamps = []  # (frame_index, timestamp_seconds)
-    tmp_dir = os.path.join(output_dir, "_frames")
-    os.makedirs(tmp_dir, exist_ok=True)
+    frame_timestamps = []
+    frame_dir = os.path.join(output_dir, "_frames", name)
 
-    for frame in container.decode(video=0):
-        if frame_count % interval == 0:
-            img = frame.to_image()
-            path = os.path.join(tmp_dir, f"{name}_{frame_count:06d}.jpg")
-            img.save(path, quality=85)
-            saved_frames.append(path)
-            frame_timestamps.append(frame_count / orig_fps)
-        frame_count += 1
-        if len(saved_frames) >= max_frames:
-            break
+    existing = sorted(Path(frame_dir).glob(f"{name}_*.jpg")) if os.path.isdir(frame_dir) else []
+    if existing:
+        saved_frames = [str(p) for p in existing]
+        for p in existing:
+            ts = int(p.stem.split("_")[-1]) / orig_fps
+            frame_timestamps.append(ts)
+        print(f"  📷 复用 {len(saved_frames)} 帧 (已缓存)")
+    else:
+        os.makedirs(frame_dir, exist_ok=True)
+        for frame in container.decode(video=0):
+            if frame_count % interval == 0:
+                img = frame.to_image()
+                path = os.path.join(frame_dir, f"{name}_{frame_count:06d}.jpg")
+                img.save(path, quality=85)
+                saved_frames.append(path)
+                frame_timestamps.append(frame_count / orig_fps)
+            frame_count += 1
+            if len(saved_frames) >= max_frames:
+                break
+        print(f"  📷 抽了 {len(saved_frames)} 帧")
 
     # 提取音频片段（每帧对应一个音频块）
     audio_segments = {}
@@ -191,16 +200,12 @@ def process_one(model, processor, video_path: str, output_dir: str,
         all_notes.append(f"## [{ts_list[0]} ~ {ts_list[-1]}]\n\n{note}\n")
         print("✓")
 
-    # 清理临时文件
-    for p in saved_frames:
-        try: os.remove(p)
-        except OSError: pass
+    # 清理临时音频（帧图片保留以便复用）
     for p in audio_segments.values():
         try: os.remove(p)
         except OSError: pass
-    for d in [tmp_dir, audio_dir]:
-        try: os.rmdir(d)
-        except OSError: pass
+    try: os.rmdir(audio_dir)
+    except OSError: pass
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write("\n\n".join(all_notes))
@@ -254,7 +259,7 @@ def main():
                     args.fps, args.max_frames, args.downsample,
                     whisper_model, args.audio_buffer)
 
-    for d in ["_frames", "_audio"]:
+    for d in ["_audio"]:
         dp = os.path.join(args.output, d)
         try: os.rmdir(dp)
         except OSError: pass
