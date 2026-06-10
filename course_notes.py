@@ -115,26 +115,67 @@ def process_one(model, processor, video_path: str, output_dir: str,
                 break
         print(f"  📷 抽了 {len(saved_frames)} 帧")
 
-    # 提取音频片段（用 ffmpeg 直接截取，PyAV seek 在某些视频上不稳定）
+    # 提取音频片段
     audio_segments = {}
-    if has_audio:
-        print(f"  🎤 提取音频片段 ...", end=" ", flush=True)
+    if audio_stream is None:
+        print(f"  ⚠️ 视频无音频轨道，跳过语音转录")
+    elif whisper_model is None:
+        print(f"  ⚠️ Whisper 未加载，跳过语音转录")
+    else:
+        print(f"  🎤 提取音频片段 (ffmpeg) ...", end=" ", flush=True)
         import subprocess
-        for idx, ts in enumerate(frame_timestamps):
-            start = max(0, ts - audio_buffer)
-            duration_seg = (interval / orig_fps) + 2 * audio_buffer
-            seg_path = os.path.join(audio_dir, f"{name}_{idx:04d}_{ts:.1f}s.wav")
-            try:
-                subprocess.run([
-                    "ffmpeg", "-y", "-loglevel", "error",
-                    "-ss", str(start), "-t", str(duration_seg),
-                    "-i", video_path,
-                    "-ac", "1", "-ar", "16000",
-                    seg_path
-                ], check=True, timeout=10)
-                audio_segments[idx] = seg_path
-            except Exception:
-                pass
+        ffmpeg_ok = False
+        try:
+            subprocess.run(["ffmpeg", "-version"], capture_output=True, timeout=3)
+            ffmpeg_ok = True
+        except Exception:
+            pass
+
+        if ffmpeg_ok:
+            for idx, ts in enumerate(frame_timestamps):
+                start = max(0, ts - audio_buffer)
+                dur = (interval / orig_fps) + 2 * audio_buffer
+                seg_path = os.path.join(audio_dir, f"{name}_{idx:04d}_{ts:.1f}s.wav")
+                try:
+                    subprocess.run([
+                        "ffmpeg", "-y", "-loglevel", "error",
+                        "-ss", str(start), "-t", str(dur),
+                        "-i", video_path,
+                        "-ac", "1", "-ar", "16000",
+                        seg_path
+                    ], check=True, timeout=10)
+                    audio_segments[idx] = seg_path
+                except Exception:
+                    pass
+        else:
+            print(f"(PyAV fallback) ...", end=" ", flush=True)
+            import av as _av
+            ac = _av.open(video_path)
+            astr = ac.streams.audio[0]
+            for idx, ts in enumerate(frame_timestamps):
+                start_t = max(0, ts - audio_buffer)
+                end_t = min(duration, ts + (interval / orig_fps) + audio_buffer)
+                seg_path = os.path.join(audio_dir, f"{name}_{idx:04d}_{ts:.1f}s.wav")
+                try:
+                    out_c = _av.open(seg_path, "w")
+                    out_s = out_c.add_stream("pcm_s16le")
+                    out_s.rate = astr.rate
+                    out_s.channels = astr.channels
+                    ac.seek(int(start_t / astr.time_base))
+                    for packet in ac.demux(astr):
+                        if packet.pts is None:
+                            continue
+                        pkt_ts = float(packet.pts * packet.time_base)
+                        if pkt_ts >= end_t:
+                            break
+                        if pkt_ts >= start_t:
+                            packet.stream = out_s
+                            out_c.mux(packet)
+                    out_c.close()
+                    audio_segments[idx] = seg_path
+                except Exception:
+                    pass
+            ac.close()
         print(f"✓ ({len(audio_segments)} 段)")
 
     container.close()
