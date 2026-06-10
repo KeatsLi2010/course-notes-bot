@@ -26,12 +26,6 @@ SYSTEM_PROMPT = """你是一个专业的课堂笔记助手。你的任务是根�
 
 NOTE_PROMPT = "请根据这张图片生成课堂笔记。"
 
-SUMMARY_PROMPT = """以上是本视频所有帧的笔记片段。请将它们整合为一份完整的课堂笔记，要求：
-- 按主题/小节组织，有清晰的标题层级
-- 合并重复内容，补全上下文关联
-- 保持 LaTeX 公式格式
-- 末尾添加「关键要点」总结"""
-
 
 def find_videos(path: str) -> list[str]:
     """查找视频文件：单文件直接返回，文件夹递归搜索"""
@@ -50,7 +44,7 @@ def process_one(model, processor, video_path: str, output_dir: str,
     import av
 
     name = Path(video_path).stem
-    output_path = os.path.join(output_dir, f"{name}.md")
+    output_path = os.path.join(output_dir, f"{name}.txt")
 
     print(f"\n{'='*60}")
     print(f"🎬 {name}")
@@ -108,23 +102,6 @@ def process_one(model, processor, video_path: str, output_dir: str,
         note = processor.batch_decode(trimmed, skip_special_tokens=True,
                                        clean_up_tokenization_spaces=False)[0]
         all_notes.append(f"## [{ts_str}]\n\n{note}\n")
-        print("✓")
-
-    if len(all_notes) >= 2:
-        print(f"  📝 汇总 ...", end=" ", flush=True)
-        combined = "\n\n".join(all_notes)
-        messages = [{"role": "user", "content": [
-            {"type": "text", "text": combined + "\n\n" + SUMMARY_PROMPT},
-        ]}]
-        inputs = processor.apply_chat_template(
-            messages, tokenize=True, add_generation_prompt=True,
-            return_dict=True, return_tensors="pt",
-        ).to(model.device)
-        generated = model.generate(**inputs, max_new_tokens=4096)
-        trimmed = [out[len(inp):] for inp, out in zip(inputs.input_ids, generated)]
-        summary = processor.batch_decode(trimmed, skip_special_tokens=True,
-                                          clean_up_tokenization_spaces=False)[0]
-        all_notes.append("\n---\n# 汇总笔记\n\n" + summary)
         print("✓")
 
     for p in saved_frames:
