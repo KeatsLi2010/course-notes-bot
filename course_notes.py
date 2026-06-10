@@ -80,16 +80,30 @@ def process_one(model, processor, video_path: str, output_dir: str,
     container.close()
 
     all_notes = []
-    for i, img_path in enumerate(saved_frames, 1):
-        ts = int(Path(img_path).stem.split("_")[-1]) / orig_fps
-        ts_str = f"{int(ts // 60)}:{int(ts % 60):02d}"
-        print(f"  [{i}/{len(saved_frames)}] {ts_str} ...", end=" ", flush=True)
+    frame_batch_size = 4  # 每批送 4 帧，可根据显存调整
 
-        messages = [{"role": "user", "content": [
-            {"type": "image", "url": img_path},
-            {"type": "text", "text": SYSTEM_PROMPT + f"\n\n[视频时间: {ts_str}]\n" + NOTE_PROMPT},
-        ]}]
+    for batch_start in range(0, len(saved_frames), frame_batch_size):
+        batch = saved_frames[batch_start:batch_start + frame_batch_size]
+        batch_num = batch_start // frame_batch_size + 1
+        total = (len(saved_frames) + frame_batch_size - 1) // frame_batch_size
 
+        # 构建多图消息
+        content = []
+        for img_path in batch:
+            ts = int(Path(img_path).stem.split("_")[-1]) / orig_fps
+            ts_str = f"{int(ts // 60)}:{int(ts % 60):02d}"
+            content.append({"type": "image", "url": img_path})
+
+        ts_list = []
+        for img_path in batch:
+            ts = int(Path(img_path).stem.split("_")[-1]) / orig_fps
+            ts_list.append(f"{int(ts // 60)}:{int(ts % 60):02d}")
+
+        content.append({"type": "text", "text": SYSTEM_PROMPT + f"\n\n[视频时间戳: {', '.join(ts_list)}]\n" + NOTE_PROMPT})
+
+        print(f"  [批 {batch_num}/{total}] {ts_list[0]} ~ {ts_list[-1]} ...", end=" ", flush=True)
+
+        messages = [{"role": "user", "content": content}]
         inputs = processor.apply_chat_template(
             messages, tokenize=True, add_generation_prompt=True,
             return_dict=True, return_tensors="pt",
@@ -97,11 +111,11 @@ def process_one(model, processor, video_path: str, output_dir: str,
             max_slice_nums=36,
         ).to(model.device)
 
-        generated = model.generate(**inputs, downsample_mode=downsample, max_new_tokens=2048)
+        generated = model.generate(**inputs, downsample_mode=downsample, max_new_tokens=4096)
         trimmed = [out[len(inp):] for inp, out in zip(inputs.input_ids, generated)]
         note = processor.batch_decode(trimmed, skip_special_tokens=True,
                                        clean_up_tokenization_spaces=False)[0]
-        all_notes.append(f"## [{ts_str}]\n\n{note}\n")
+        all_notes.append(f"## [{ts_list[0]} ~ {ts_list[-1]}]\n\n{note}\n")
         print("✓")
 
     for p in saved_frames:
