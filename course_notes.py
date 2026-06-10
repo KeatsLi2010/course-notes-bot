@@ -265,6 +265,47 @@ def main():
         print(f"❌ 未找到视频: {args.video}")
         return
 
+    # --test-audio: 跳过模型，只测音频
+    if args.test_audio:
+        test_video = videos[0]
+        print(f"🧪 音频测试: {test_video}")
+        import av as _av
+        c = _av.open(test_video)
+        astr = c.streams.audio[0] if c.streams.audio else None
+        dur = float(c.streams.video[0].duration * c.streams.video[0].time_base)
+        fps_v = float(c.streams.video[0].average_rate)
+        c.close()
+        if astr is None:
+            print("❌ 视频无音频轨道")
+            return
+        interval = max(1, int(fps_v / args.fps))
+        ts = interval / fps_v
+        start = max(0, ts - args.audio_buffer)
+        seg_dur = (interval / fps_v) + 2 * args.audio_buffer
+        seg_path = os.path.join(args.output, "_test_audio.wav")
+        os.makedirs(args.output, exist_ok=True)
+        import subprocess
+        try:
+            subprocess.run(["ffmpeg", "-y", "-loglevel", "error",
+                "-ss", str(start), "-t", str(seg_dur),
+                "-i", test_video, "-ac", "1", "-ar", "16000", seg_path],
+                check=True, timeout=10)
+            print(f"✅ 音频提取成功: {start:.1f}s ~ {start+seg_dur:.1f}s")
+            try:
+                import whisper
+                m = whisper.load_model(args.whisper)
+                result = m.transcribe(seg_path, language="zh", fp16=False)
+                print(f"📝 转录: {result['text'].strip()}")
+            except Exception as e:
+                print(f"⚠️ Whisper 失败: {e}")
+            try: os.remove(seg_path)
+            except: pass
+        except FileNotFoundError:
+            print("❌ ffmpeg 未安装/不在 PATH")
+        except Exception as e:
+            print(f"❌ ffmpeg 失败: {e}")
+        return
+
     print(f"🎯 找到 {len(videos)} 个视频")
     os.makedirs(args.output, exist_ok=True)
 
@@ -288,47 +329,6 @@ def main():
         whisper_model = load_whisper(args.whisper)
     except Exception as e:
         print(f"⚠️ Whisper 加载失败: {e}")
-    if args.test_audio:
-        test_video = videos[0]
-        print(f"\n🧪 音频测试: {test_video}")
-        import av as _av
-        c = _av.open(test_video)
-        vs = c.streams.video[0]
-        astr = c.streams.audio[0] if c.streams.audio else None
-        c.close()
-        if astr is None:
-            print("❌ 视频无音频轨道")
-            return
-        dur = float(vs.duration * vs.time_base)
-        fps_v = float(vs.average_rate)
-        interval = max(1, int(fps_v / args.fps))
-        ts = interval / fps_v  # 第一帧的时间戳
-        start = max(0, ts - args.audio_buffer)
-        seg_dur = (interval / fps_v) + 2 * args.audio_buffer
-        seg_path = os.path.join(args.output, "_test_audio.wav")
-
-        import subprocess
-        ok = False
-        try:
-            subprocess.run(["ffmpeg", "-y", "-loglevel", "error",
-                "-ss", str(start), "-t", str(seg_dur),
-                "-i", test_video, "-ac", "1", "-ar", "16000", seg_path],
-                check=True, timeout=10)
-            ok = True
-        except Exception as e:
-            print(f"⚠️ ffmpeg 失败: {e}")
-
-        if ok and whisper_model:
-            print(f"  音频段: {start:.1f}s ~ {start+seg_dur:.1f}s")
-            txt = transcribe_segment(whisper_model, seg_path)
-            print(f"  转录结果: {txt}")
-            try: os.remove(seg_path)
-            except: pass
-        elif ok:
-            print(f"  ✅ 音频提取成功，但 Whisper 未加载")
-        else:
-            print("  ❌ 音频提取失败")
-        return
 
     for video_path in videos:
         process_one(model, processor, video_path, args.output,
