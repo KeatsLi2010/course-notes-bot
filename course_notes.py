@@ -34,10 +34,10 @@ def find_videos(path: str) -> list[str]:
 
 
 def load_whisper(model_name: str):
-    """加载 Whisper，大模型慢但准，小模型快但错多"""
+    """加载 Whisper 到 CPU，不抢 GPU 显存"""
     import whisper
-    print(f"⏳ 加载 Whisper {model_name} ...")
-    return whisper.load_model(model_name)
+    print(f"⏳ 加载 Whisper {model_name} (CPU) ...")
+    return whisper.load_model(model_name, device="cpu")
 
 
 def transcribe_segment(whisper_model, audio_path: str) -> str:
