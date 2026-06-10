@@ -23,7 +23,13 @@ except ImportError:
     pass
 
 import argparse
+import re
 from pathlib import Path
+
+
+def strip_thinking(text: str) -> str:
+    """移除模型的  `  ` 思考块"""
+    return re.sub(r'`[^`]*`', '', text).strip()
 
 
 SYSTEM_PROMPT = """你是一个专业的课堂笔记助手。根据课件截图/板书和同步的语音转录，生成结构化的课堂笔记。
@@ -235,6 +241,7 @@ def process_one(model, processor, video_path: str, output_dir: str,
         trimmed = [out[len(inp):] for inp, out in zip(inputs.input_ids, generated)]
         note = processor.batch_decode(trimmed, skip_special_tokens=True,
                                        clean_up_tokenization_spaces=False)[0]
+        note = strip_thinking(note)
         all_notes.append(f"## [{ts_list[0]} ~ {ts_list[-1]}]\n\n{note}\n")
         print("✓")
 
