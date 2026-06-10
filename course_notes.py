@@ -154,8 +154,8 @@ def process_one(model, processor, video_path: str, output_dir: str,
     audio_segments = {}
     if audio_stream is None:
         print(f"  ⚠️ 视频无音频轨道，跳过语音转录")
-    elif whisper_model is None:
-        print(f"  ⚠️ Whisper 未加载，跳过语音转录")
+    elif asr_model is None:
+        print(f"  ⚠️ ASR 未加载，跳过语音转录")
     else:
         print(f"  🎤 提取音频片段 (ffmpeg) ...", end=" ", flush=True)
         import subprocess
@@ -384,9 +384,6 @@ def main():
             print("  已回退到 Whisper")
         except Exception as e:
             print(f"⚠️ Whisper 加载失败: {e}")
-
-    # 去掉旧的双重加载
-    whisper_model = asr_model  # 统一变量名给 process_one 用
 
     for video_path in videos:
         process_one(model, processor, video_path, args.output,
