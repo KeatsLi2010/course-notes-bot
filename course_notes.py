@@ -117,23 +117,23 @@ def process_one(model, processor, video_path: str, output_dir: str,
                 break
         print(f"  📷 抽了 {len(saved_frames)} 帧")
 
-    # 提取音频片段（每帧对应一个音频块）
+    # 提取音频片段（单独开 container，避免视频解码后的指针问题）
     audio_segments = {}
     if has_audio:
         print(f"  🎤 提取音频片段 ...", end=" ", flush=True)
+        ac = av.open(video_path)
+        astr = ac.streams.audio[0]
         for idx, ts in enumerate(frame_timestamps):
             start = max(0, ts - audio_buffer)
             end = min(duration, ts + (interval / orig_fps) + audio_buffer)
             seg_path = os.path.join(audio_dir, f"{name}_{idx:04d}_{ts:.1f}s.wav")
-
             try:
                 out_container = av.open(seg_path, "w")
                 out_stream = out_container.add_stream("pcm_s16le")
-                out_stream.rate = audio_stream.rate
-                out_stream.channels = audio_stream.channels
-
-                container.seek(int(start * av.time_base))
-                for packet in container.demux(audio_stream):
+                out_stream.rate = astr.rate
+                out_stream.channels = astr.channels
+                ac.seek(int(start * av.time_base), stream=astr)
+                for packet in ac.demux(astr):
                     if packet.pts is None:
                         continue
                     pkt_ts = float(packet.pts * packet.time_base)
@@ -146,9 +146,11 @@ def process_one(model, processor, video_path: str, output_dir: str,
                 audio_segments[idx] = seg_path
             except Exception:
                 pass
+        ac.close()
         print(f"✓ ({len(audio_segments)} 段)")
 
     container.close()
+    print(f"  📷 {'复用' if existing else '抽了'} {len(saved_frames)} 帧")
 
     # 逐批推理
     all_notes = []
