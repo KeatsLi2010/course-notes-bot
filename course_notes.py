@@ -15,7 +15,6 @@ import os
 
 # 避免每次启动重新编译扩展
 os.environ.setdefault("TRITON_CACHE_DIR", os.path.join(os.path.dirname(__file__), ".triton_cache"))
-os.environ.setdefault("SDPA_KERNEL_DISABLE", "1")  # 用 PyTorch 内置 SDPA，不编译 flash-attn
 os.environ.setdefault("TORCH_COMPILE_DISABLE", "1")  # 禁用 torch.compile
 
 from pathlib import Path
