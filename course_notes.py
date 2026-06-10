@@ -54,7 +54,12 @@ def load_whisper(model_name: str):
 
 def transcribe_segment(whisper_model, audio_path: str) -> str:
     """用 Whisper 转录一段音频"""
-    result = whisper_model.transcribe(audio_path, language="zh", fp16=False)
+    result = whisper_model.transcribe(
+        audio_path,
+        language="zh",
+        fp16=False,
+        initial_prompt="以下是普通话的句子。",
+    )
     return result["text"].strip()
 
 
@@ -294,7 +299,8 @@ def main():
             try:
                 import whisper
                 m = whisper.load_model(args.whisper)
-                result = m.transcribe(seg_path, language="zh", fp16=False)
+                result = m.transcribe(seg_path, language="zh", fp16=False,
+                                     initial_prompt="以下是普通话的句子。")
                 print(f"📝 转录: {result['text'].strip()}")
             except Exception as e:
                 print(f"⚠️ Whisper 失败: {e}")
