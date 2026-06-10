@@ -233,9 +233,13 @@ def main():
 
     print(f"⏳ 加载 VLM {args.model} ...")
     processor = AutoProcessor.from_pretrained(args.model, trust_remote_code=True)
+
+    dtype = torch.float16 if torch.cuda.is_available() else torch.float32
+    print(f"  精度: {dtype}")
+
     model = AutoModelForImageTextToText.from_pretrained(
         args.model,
-        torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+        dtype=dtype,
         device_map="auto",
         trust_remote_code=True,
     )
