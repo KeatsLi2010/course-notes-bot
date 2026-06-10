@@ -34,10 +34,10 @@ def find_videos(path: str) -> list[str]:
 
 
 def load_whisper(model_name: str):
-    """加载 Whisper 到 CPU，不抢 GPU 显存"""
+    """加载 Whisper"""
     import whisper
-    print(f"⏳ 加载 Whisper {model_name} (CPU) ...")
-    return whisper.load_model(model_name, device="cpu")
+    print(f"⏳ 加载 Whisper {model_name} ...")
+    return whisper.load_model(model_name)
 
 
 def transcribe_segment(whisper_model, audio_path: str) -> str:
@@ -216,30 +216,26 @@ def main():
     print(f"🎯 找到 {len(videos)} 个视频")
     os.makedirs(args.output, exist_ok=True)
 
-    # Whisper
-    whisper_model = None
-    try:
-        whisper_model = load_whisper(args.whisper)
-    except Exception as e:
-        print(f"⚠️ Whisper 加载失败，跳过语音转录: {e}")
-
-    # VLM
+    # 先加载 VLM（需要 CUDA）
     import torch
     from transformers import AutoModelForImageTextToText, AutoProcessor
 
     print(f"⏳ 加载 VLM {args.model} ...")
     processor = AutoProcessor.from_pretrained(args.model, trust_remote_code=True)
-
-    dtype = torch.float16 if torch.cuda.is_available() else torch.float32
-    print(f"  精度: {dtype}")
-
     model = AutoModelForImageTextToText.from_pretrained(
         args.model,
-        dtype=dtype,
+        torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
         device_map="auto",
         trust_remote_code=True,
     )
     print("✅ VLM 就绪")
+
+    # 再加载 Whisper
+    whisper_model = None
+    try:
+        whisper_model = load_whisper(args.whisper)
+    except Exception as e:
+        print(f"⚠️ Whisper 加载失败，跳过语音转录: {e}")
 
     for video_path in videos:
         process_one(model, processor, video_path, args.output,
