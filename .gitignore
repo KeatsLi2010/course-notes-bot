@@ -1,0 +1,4 @@
+*.pyc
+__pycache__/
+_video_frames/
+.DS_Store
