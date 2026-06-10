@@ -4,3 +4,4 @@ _frames/
 .DS_Store
 model/
 notes/
+.triton_cache/
