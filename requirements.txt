@@ -3,4 +3,6 @@ torch>=2.0
 torchvision
 av
 openai-whisper
+funasr>=1.2
+modelscope
 triton-windows

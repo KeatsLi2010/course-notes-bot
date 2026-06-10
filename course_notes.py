@@ -51,6 +51,30 @@ def find_videos(path: str) -> list[str]:
     return sorted([str(f) for f in p.rglob("*") if f.suffix.lower() in exts])
 
 
+def load_sensevoice():
+    """加载 SenseVoice — 中文识别比 Whisper 更准更快"""
+    from funasr import AutoModel
+    print(f"⏳ 加载 SenseVoice Small ...")
+    model = AutoModel(
+        model="iic/SenseVoiceSmall",
+        trust_remote_code=True,
+        device="cuda:0" if __import__('torch').cuda.is_available() else "cpu",
+    )
+    return model
+
+
+def transcribe_sensevoice(model, audio_path: str) -> str:
+    """用 SenseVoice 转录"""
+    from funasr.utils.postprocess_utils import rich_transcription_postprocess
+    res = model.generate(
+        input=audio_path,
+        cache={},
+        language="zh",
+        use_itn=True,
+    )
+    return rich_transcription_postprocess(res[0]["text"])
+
+
 def load_whisper(model_name: str):
     """加载 Whisper"""
     import whisper
@@ -71,7 +95,7 @@ def transcribe_segment(whisper_model, audio_path: str) -> str:
 
 def process_one(model, processor, video_path: str, output_dir: str,
                 fps: float, max_frames: int, downsample: str,
-                whisper_model, audio_buffer: float = 5.0):
+                asr_model, transcribe_fn, audio_buffer: float = 5.0):
     import av
 
     name = Path(video_path).stem
@@ -96,7 +120,7 @@ def process_one(model, processor, video_path: str, output_dir: str,
         interval = max(1, total_frames // max_frames)
 
     actual_frames = min(total_frames // interval, max_frames)
-    has_audio = audio_stream is not None and whisper_model is not None
+    has_audio = audio_stream is not None and asr_model is not None
     print(f"  时长: {duration:.0f}s | {orig_fps:.1f}fps | ~{actual_frames}帧 | 音频: {'✓' if has_audio else '✗'}")
 
     # 抽帧（若已存在则跳过）
@@ -214,7 +238,7 @@ def process_one(model, processor, video_path: str, output_dir: str,
             for i in batch_idx:
                 if i in audio_segments:
                     try:
-                        txt = transcribe_segment(whisper_model, audio_segments[i])
+                        txt = transcribe_fn(audio_segments[i])
                         t = ts_list[i - batch_start] if (i - batch_start) < len(ts_list) else ""
                         transcript_lines.append(f"[{t}] {txt}")
                     except Exception:
@@ -262,6 +286,8 @@ def main():
     parser.add_argument("--video", required=True, help="视频文件或文件夹")
     parser.add_argument("--model", default="./model", help="模型本地路径")
     parser.add_argument("--whisper", default="base", help="Whisper 模型 (tiny/base/small/medium/large-v3)")
+    parser.add_argument("--asr", default="sensevoice", choices=["sensevoice", "whisper"],
+                        help="语音识别引擎 (sensevoice=更准更快, whisper=备选)")
     parser.add_argument("--output", default="./notes", help="输出目录")
     parser.add_argument("--downsample", default="16x", choices=["4x", "16x"])
     parser.add_argument("--fps", type=float, default=0.5)
@@ -303,12 +329,17 @@ def main():
                 "-i", test_video, "-ac", "1", "-ar", "16000", seg_path],
                 check=True, timeout=10)
             print(f"✅ 音频提取成功: {start:.1f}s ~ {start+seg_dur:.1f}s")
+            # 测试 SenseVoice
             try:
-                import whisper
-                m = whisper.load_model(args.whisper)
-                result = m.transcribe(seg_path, language="zh", fp16=False,
-                                     initial_prompt="以下是普通话的句子。")
-                print(f"📝 转录: {result['text'].strip()}")
+                from funasr import AutoModel
+                from funasr.utils.postprocess_utils import rich_transcription_postprocess
+                model = AutoModel(model="iic/SenseVoiceSmall", trust_remote_code=True,
+                                  device="cuda:0")
+                res = model.generate(input=seg_path, cache={}, language="zh", use_itn=True)
+                text = rich_transcription_postprocess(res[0]["text"])
+                print(f"📝 SenseVoice: {text}")
+            except Exception as e:
+                print(f"⚠️ SenseVoice 失败: {e}")
             except Exception as e:
                 print(f"⚠️ Whisper 失败: {e}")
             try: os.remove(seg_path)
@@ -336,17 +367,31 @@ def main():
     )
     print("✅ VLM 就绪")
 
-    # 加载 Whisper
-    whisper_model = None
-    try:
-        whisper_model = load_whisper(args.whisper)
-    except Exception as e:
-        print(f"⚠️ Whisper 加载失败: {e}")
+    # 加载语音识别
+    asr_model = None
+    transcribe_fn = None
+    if args.asr == "sensevoice":
+        try:
+            asr_model = load_sensevoice()
+            transcribe_fn = lambda path: transcribe_sensevoice(asr_model, path)
+        except Exception as e:
+            print(f"⚠️ SenseVoice 加载失败: {e}")
+    if asr_model is None:
+        try:
+            w = load_whisper(args.whisper)
+            asr_model = w
+            transcribe_fn = lambda path: transcribe_segment(w, path)
+            print("  已回退到 Whisper")
+        except Exception as e:
+            print(f"⚠️ Whisper 加载失败: {e}")
+
+    # 去掉旧的双重加载
+    whisper_model = asr_model  # 统一变量名给 process_one 用
 
     for video_path in videos:
         process_one(model, processor, video_path, args.output,
                     args.fps, args.max_frames, args.downsample,
-                    whisper_model, args.audio_buffer)
+                    asr_model, transcribe_fn, args.audio_buffer)
 
     for d in ["_audio"]:
         dp = os.path.join(args.output, d)
