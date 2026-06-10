@@ -12,7 +12,8 @@
 import argparse
 import os
 
-os.environ.setdefault("GPTQMODEL_NOGIL", "0")  # 禁用 gptqmodel 的 triton patcher，避免 _cache_lock 崩溃
+os.environ.setdefault("GPTQMODEL_NOGIL", "0")
+os.environ.setdefault("TRITON_CACHE_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), ".triton_cache"))
 
 from pathlib import Path
 
