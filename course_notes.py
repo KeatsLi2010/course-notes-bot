@@ -13,6 +13,7 @@ import argparse
 import os
 
 os.environ.setdefault("TRITON_CACHE_DIR", os.path.join(os.path.dirname(__file__) or ".", ".triton_cache"))
+os.environ.setdefault("SDPA_KERNEL_DISABLE", "1")  # Windows 上 flash-attn 编译不稳定，用 PyTorch 内置
 os.environ.setdefault("TORCH_COMPILE_DISABLE", "1")
 
 from pathlib import Path
