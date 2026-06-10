@@ -14,16 +14,18 @@ import os
 os.environ["GPTQMODEL_NOGIL"] = "0"
 os.environ["TRITON_CACHE_DIR"] = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".triton_cache")
 
-# triton 新版 Autotuner 改名 autotuner，gptqmodel 还用旧名
-import threading
-import triton.runtime.jit
-_cls = getattr(triton.runtime.jit, 'Autotuner', None) or getattr(triton.runtime.jit, 'autotuner', None)
-if _cls is not None and not hasattr(_cls, '_cache_lock'):
-    _cls._cache_lock = threading.Lock()
-    triton.runtime.jit.Autotuner = _cls  # 兼容旧引用
-
 import argparse
 from pathlib import Path
+
+# 修补 gptqmodel 的 triton patcher — 新版 triton Autotuner 没有 _cache_lock
+import threading
+import gptqmodel.utils.nogil_patcher as _np
+_orig_patched_run = _np.patched_run
+def _safe_patched_run(self, *args, **kwargs):
+    if not hasattr(self, '_cache_lock'):
+        self._cache_lock = threading.Lock()
+    return _orig_patched_run(self, *args, **kwargs)
+_np.patched_run = _safe_patched_run
 
 
 SYSTEM_PROMPT = """你是一个专业的课堂笔记助手。根据课件截图/板书和同步的语音转录，生成结构化的课堂笔记。
