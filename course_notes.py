@@ -14,6 +14,12 @@ import os
 os.environ["GPTQMODEL_NOGIL"] = "0"
 os.environ["TRITON_CACHE_DIR"] = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".triton_cache")
 
+# 修补 triton Autotuner — gptqmodel 的 nogil_patcher 需要 _cache_lock
+import threading
+import triton.runtime.jit
+if not hasattr(triton.runtime.jit.Autotuner, '_cache_lock'):
+    triton.runtime.jit.Autotuner._cache_lock = threading.Lock()
+
 import argparse
 from pathlib import Path
 
