@@ -115,36 +115,26 @@ def process_one(model, processor, video_path: str, output_dir: str,
                 break
         print(f"  📷 抽了 {len(saved_frames)} 帧")
 
-    # 提取音频片段（单独开 container，避免视频解码后的指针问题）
+    # 提取音频片段（用 ffmpeg 直接截取，PyAV seek 在某些视频上不稳定）
     audio_segments = {}
     if has_audio:
         print(f"  🎤 提取音频片段 ...", end=" ", flush=True)
-        ac = av.open(video_path)
-        astr = ac.streams.audio[0]
+        import subprocess
         for idx, ts in enumerate(frame_timestamps):
             start = max(0, ts - audio_buffer)
-            end = min(duration, ts + (interval / orig_fps) + audio_buffer)
+            duration_seg = (interval / orig_fps) + 2 * audio_buffer
             seg_path = os.path.join(audio_dir, f"{name}_{idx:04d}_{ts:.1f}s.wav")
             try:
-                out_container = av.open(seg_path, "w")
-                out_stream = out_container.add_stream("pcm_s16le")
-                out_stream.rate = astr.rate
-                out_stream.channels = astr.channels
-                ac.seek(int(start * av.time_base), stream=astr)
-                for packet in ac.demux(astr):
-                    if packet.pts is None:
-                        continue
-                    pkt_ts = float(packet.pts * packet.time_base)
-                    if pkt_ts >= end:
-                        break
-                    if pkt_ts >= start:
-                        packet.stream = out_stream
-                        out_container.mux(packet)
-                out_container.close()
+                subprocess.run([
+                    "ffmpeg", "-y", "-loglevel", "error",
+                    "-ss", str(start), "-t", str(duration_seg),
+                    "-i", video_path,
+                    "-ac", "1", "-ar", "16000",
+                    seg_path
+                ], check=True, timeout=10)
                 audio_segments[idx] = seg_path
             except Exception:
                 pass
-        ac.close()
         print(f"✓ ({len(audio_segments)} 段)")
 
     container.close()
