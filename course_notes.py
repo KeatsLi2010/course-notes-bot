@@ -9,12 +9,12 @@
   pip install "transformers[torch]>=5.7.0" torchvision av openai-whisper
 """
 
-import argparse
+# 必须在所有 import 之前设置
 import os
+os.environ["GPTQMODEL_NOGIL"] = "0"
+os.environ["TRITON_CACHE_DIR"] = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".triton_cache")
 
-os.environ.setdefault("GPTQMODEL_NOGIL", "0")
-os.environ.setdefault("TRITON_CACHE_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), ".triton_cache"))
-
+import argparse
 from pathlib import Path
 
 
