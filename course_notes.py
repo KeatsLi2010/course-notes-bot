@@ -118,8 +118,8 @@ def process_one(model, processor, video_path: str, output_dir: str,
 def main():
     parser = argparse.ArgumentParser(description="课堂笔记 — 视频批量处理")
     parser.add_argument("--video", required=True, help="视频文件或文件夹")
-    parser.add_argument("--model", default="openbmb/MiniCPM-V-4.6-Thinking-AWQ",
-                        help="模型 ID 或本地路径")
+    parser.add_argument("--model", default="./model",
+                        help="模型本地路径 (默认 ./model)")
     parser.add_argument("--output", default="./notes", help="输出目录")
     parser.add_argument("--downsample", default="16x", choices=["4x", "16x"])
     parser.add_argument("--fps", type=float, default=0.5)

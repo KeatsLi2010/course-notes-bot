@@ -1,4 +1,6 @@
 *.pyc
 __pycache__/
-_video_frames/
+_frames/
 .DS_Store
+model/
+notes/
